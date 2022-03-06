@@ -69,7 +69,74 @@ export const ArtView = () => {
   const description = data?.description;
   const attributes = data?.attributes;
 
+  const [canChange, changeIndex] =
+  checkIfCanChange(data);
+
   const pubkey = wallet?.publicKey?.toBase58() || '';
+
+  const changeInner = async () => {
+    if (
+      !art.mint ||
+      !data ||
+      !canChange ||
+      changeIndex < 0 ||
+      changeIndex > 2
+    ) {
+      return;
+    }
+
+    const creators: Array<Creator> | null = art.creators?.map(artist => {
+      if (!artist.address || !artist.verified || !artist.share) {
+        return null;
+      }
+      return new Creator({
+        address: artist.address,
+        verified: artist.verified,
+        share: artist.share,
+      });
+    }).filter(c => c != null) as Array<Creator> || null;
+
+    const metadata = {
+      name: data.name,
+      symbol: data.symbol,
+      creators,
+      collection: data.collection,
+      description: data.description,
+      sellerFeeBasisPoints: data.seller_fee_basis_points,
+      image: data.image,
+      animation_url: data.animation_url,
+      attributes: data.attributes,
+      external_url: data.external_url,
+      properties: {
+        files: data.properties.files,
+        category: data.properties?.category,
+        creators: data.properties?.creators,
+      },
+    };
+
+    await changeNFT(
+      connection,
+      wallet,
+      endpoint.name,
+      metadata,
+      changeIndex + 1,
+      art.mint,
+    );
+};
+
+const changeThing = async (e: React.MouseEvent<HTMLElement>) => {
+  e.preventDefault();
+  try {
+    setChanging(true);
+    await changeInner();
+    refresh();
+    await pullUserMetadata(userAccounts);
+  } catch (e) {
+    console.error(e);
+  }
+  setChanging(false);
+  setRefreshIndex(i => i + 1);
+};
 
   const tag = (
     <div className="info-header">
@@ -122,6 +189,19 @@ export const ArtView = () => {
                 {art.title || <Skeleton paragraph={{ rows: 0 }} />}
               </div>
             </Row>
+            {canChange && changeIndex < 3 && (
+              <Row>
+                <div style={{ marginBottom: '12px' }}>
+                  <Button
+                    onClick={changeThing}
+                    disabled={changing}
+                    style={changing ? { color: "gray" } : { color: "white" }}
+                  >
+                    {changing ? "Changing NFT..." : "Changing NFT"}
+                  </Button>
+                </div>
+              </Row>
+            )}
             <Row>
               <Col span={6}>
                 <h6>Royalties</h6>
@@ -266,3 +346,59 @@ export const ArtView = () => {
     </Content>
   );
 };
+
+function checkIfCanChange(
+  data?: IMetadataExtension,
+): [boolean, number] {
+  if (
+    !data ||
+    !data.attributes ||
+    getAttribute(data.attributes, 'canChange') !== 'true'
+  ) {
+    return [false, 0];
+  }
+
+  const image = data.image;
+  const changeIndexStr = getAttribute(data.attributes, 'changeIndex');
+  if (changeIndexStr === '0') {
+    if (
+      image !==
+      'https://www.arweave.net/sMmfOCzGXT_rOdBZ8ADCd_I0WtN1S_BZWWZE7eDwwqY?ext=jpeg'
+    ) {
+      return [false, 0];
+    }
+    return [true, 0];
+  } else if (changeIndexStr === '1') {
+    if (
+      image !==
+      'https://www.arweave.net/atvajZ1awqRU92UiglTNsVekICktdlycHBltw8mkqvs?ext=jpeg'
+    ) {
+      return [false, 0];
+    }
+    return [true, 1];
+  } else if (changeIndexStr === '2') {
+    if (
+      image !==
+      'https://www.arweave.net/feiSpWJbNExeBKpwd5R9KldHP9-2FVqwBEy6YWqjv5o?ext=jpeg'
+    ) {
+      return [false, 0];
+    }
+    return [true, 2];
+  } else if (changeIndexStr === '3') {
+    if (
+      image !==
+      'https://www.arweave.net/1GREIvzEUePhWrZmrGYuzEc6IuUKiBw6O8l2IvDkz1E?ext=jpeg'
+    ) {
+      return [false, 0];
+    }
+    return [true, 3];
+  }
+  return [false, 0];
+}
+
+function getAttribute(
+  attributes: Attribute[],
+  name: string,
+): string | undefined {
+  return attributes.find(attr => attr.trait_type === name)?.value.toString();
+}

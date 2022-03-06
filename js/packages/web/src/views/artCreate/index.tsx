@@ -51,10 +51,23 @@ import {
 import { useTokenList } from '../../contexts/tokenList';
 import { SafetyDepositDraft } from '../../actions/createAuctionManager';
 import { ArtSelector } from '../auctionCreate/artSelector';
+import { ArtworkViewState } from "../artworks/types";
+import { useItems } from "../artworks/hooks/useItems";
+import SmallLoader from "../../components/SmallLoader";
+import { pull } from "lodash";
 
 const { Step } = Steps;
 const { Dragger } = Upload;
 const { Text } = Typography;
+
+type MetadataCategoryChoice = {
+  category: MetadataCategory;
+  canChange: boolean;
+};
+
+type MetadataExtension = IMetadataExtension & {
+  canChange: boolean;
+};
 
 export const ArtCreateView = () => {
   const connection = useConnection();
@@ -69,9 +82,7 @@ export const ArtCreateView = () => {
   const [step, setStep] = useState<number>(0);
   const [stepsVisible, setStepsVisible] = useState<boolean>(true);
   const [isMinting, setMinting] = useState<boolean>(false);
-  const [nft, setNft] = useState<
-    { metadataAccount: StringPublicKey } | undefined
-  >(undefined);
+  const [nft, setNft] = useState<{ metadataAccount: StringPublicKey } | undefined>(undefined);
   const [files, setFiles] = useState<File[]>([]);
   const [isCollection, setIsCollection] = useState<boolean>(false);
   const [attributes, setAttributes] = useState<IMetadataExtension>({
@@ -89,6 +100,7 @@ export const ArtCreateView = () => {
       files: [],
       category: MetadataCategory.Image,
     },
+    canChange: true,
   });
 
   const gotoStep = useCallback(
@@ -132,6 +144,7 @@ export const ArtCreateView = () => {
         endpoint.name,
         files,
         metadata,
+        attributes.canChange,
         setNFTcreateProgress,
         attributes.properties?.maxSupply,
       );
@@ -177,10 +190,19 @@ export const ArtCreateView = () => {
                   ...attributes,
                   properties: {
                     ...attributes.properties,
-                    category,
+                    category: category.category,
                   },
+                  canChange:
+                  category.canChange,
                 });
-                gotoStep(1);
+                if (
+                  category.category === MetadataCategory.Image &&
+                  category.canChange
+                ) {
+                  gotoStep(2);
+                } else {
+                  gotoStep(1);
+                }
               }}
             />
           )}
@@ -229,7 +251,17 @@ export const ArtCreateView = () => {
           )}
           {0 < step && step < 5 && (
             <div style={{ margin: 'auto', width: 'fit-content' }}>
-              <Button onClick={() => gotoStep(step - 1)}>Back</Button>
+              <Button
+                onClick={() =>
+                  gotoStep(
+                    step === 2 && attributes.canChange
+                      ? step - 2
+                      : step - 1,
+                  )
+                }
+              >
+                Back
+              </Button>
             </div>
           )}
         </Col>
@@ -266,7 +298,31 @@ const CategoryStep = (props: {
             <Button
               className="type-btn"
               size="large"
-              onClick={() => props.confirm(MetadataCategory.Image)}
+              onClick={() =>
+                props.confirm({
+                  category: MetadataCategory.Image,
+                  canChange: true,
+                })
+              }
+            >
+              <div>
+                <div>Dynamic NFT</div>
+                <div className="type-btn-description">
+                  NFT changes dynamically
+                </div>
+              </div>
+            </Button>
+          </Row>
+          <Row>
+            <Button
+              className="type-btn"
+              size="large"
+              onClick={() =>
+                props.confirm({
+                  category: MetadataCategory.Image,
+                  canChange: false,
+                })
+              }
             >
               <div>
                 <div>Image</div>
@@ -278,7 +334,12 @@ const CategoryStep = (props: {
             <Button
               className="type-btn"
               size="large"
-              onClick={() => props.confirm(MetadataCategory.Video)}
+              onClick={() =>
+                props.confirm({
+                  category: MetadataCategory.Video,
+                  canChange: false,
+                })
+              }
             >
               <div>
                 <div>Video</div>
@@ -290,7 +351,12 @@ const CategoryStep = (props: {
             <Button
               className="type-btn"
               size="large"
-              onClick={() => props.confirm(MetadataCategory.Audio)}
+              onClick={() =>
+                props.confirm({
+                  category: MetadataCategory.Audio,
+                  canChange: false,
+                })
+              }
             >
               <div>
                 <div>Audio</div>
@@ -302,7 +368,12 @@ const CategoryStep = (props: {
             <Button
               className="type-btn"
               size="large"
-              onClick={() => props.confirm(MetadataCategory.VR)}
+              onClick={() =>
+                props.confirm({
+                  category: MetadataCategory.VR,
+                  canChange: false,
+                })
+              }
             >
               <div>
                 <div>AR/3D</div>
@@ -314,7 +385,12 @@ const CategoryStep = (props: {
             <Button
               className="type-btn"
               size="large"
-              onClick={() => props.confirm(MetadataCategory.HTML)}
+              onClick={() =>
+                props.confirm({
+                  category: MetadataCategory.HTML,
+                  canChange: false,
+                })
+              }
             >
               <div>
                 <div>HTML Asset</div>
@@ -674,15 +750,25 @@ const InfoStep = (props: {
       </Row>
       <Row className="content-action" justify="space-around">
         <Col>
-          {props.attributes.image && (
+          {(props.attributes.canChange ||
+            props.attributes.image) && (
             <ArtCard
-              image={image}
+              image={
+                props.attributes.canChange
+                  ? 'https://www.arweave.net/sMmfOCzGXT_rOdBZ8ADCd_I0WtN1S_BZWWZE7eDwwqY?ext=jpeg'
+                  : image
+              }
               animationURL={props.attributes.animation_url}
               category={props.attributes.properties?.category}
               name={props.attributes.name}
               symbol={props.attributes.symbol}
               small={true}
-              artView={!(props.files.length > 1)}
+              artView={
+                !(
+                  props.files.length >
+                  1 + (props.attributes.canChange ? 1 : 0)
+                )
+              }
               className="art-create-card"
             />
           )}
@@ -1169,9 +1255,14 @@ const LaunchStep = (props: {
       </Row>
       <Row className="content-action" justify="space-around">
         <Col>
-          {props.attributes.image && (
+          {(props.attributes.canChange ||
+            props.attributes.image) && (
             <ArtCard
-              image={image}
+              image={
+                props.attributes.canChange
+                  ? 'https://www.arweave.net/sMmfOCzGXT_rOdBZ8ADCd_I0WtN1S_BZWWZE7eDwwqY?ext=jpeg'
+                  : image
+              }
               animationURL={props.attributes.animation_url}
               category={props.attributes.properties?.category}
               name={props.attributes.name}
