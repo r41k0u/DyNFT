@@ -14,13 +14,20 @@ import { useParams } from 'react-router-dom';
 import { useArt, useExtendedArt } from '../../hooks';
 
 import { ArtContent } from '../../components/ArtContent';
-import { shortenAddress, useConnection } from '@oyster/common';
+import {
+  Attribute, Creator,
+  IMetadataExtension,
+  shortenAddress,
+  useConnection,
+  useConnectionConfig, useMeta, useUserAccounts,
+} from '@oyster/common';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { MetaAvatar } from '../../components/MetaAvatar';
 import { sendSignMetadata } from '../../actions/sendSignMetadata';
 import { ViewOn } from '../../components/ViewOn';
 import { ArtType } from '../../types';
 import { ArtMinting } from '../../components/ArtMinting';
+import { changeNFT } from '../../actions';
 
 const { Content } = Layout;
 
@@ -28,9 +35,14 @@ export const ArtView = () => {
   const { id } = useParams<{ id: string }>();
   const wallet = useWallet();
   const [remountArtMinting, setRemountArtMinting] = useState(0);
+  const [changing, setChanging] = useState(false);
+  const { pullUserMetadata } = useMeta();
+  const { userAccounts, refresh } = useUserAccounts();
+  const [refreshIndex, setRefreshIndex] = useState(0);
 
   const connection = useConnection();
-  const art = useArt(id);
+  const { endpoint } = useConnectionConfig();
+  const art = useArt(id, refreshIndex);
   let badge = '';
   let maxSupply = '';
   if (art.type === ArtType.NFT) {
@@ -45,7 +57,7 @@ export const ArtView = () => {
   } else if (art.type === ArtType.Print) {
     badge = `${art.edition} of ${art.supply}`;
   }
-  const { ref, data } = useExtendedArt(id);
+  const { ref, data } = useExtendedArt(id, refreshIndex);
 
   // const { userAccounts } = useUserAccounts();
 

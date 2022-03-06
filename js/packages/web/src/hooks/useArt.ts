@@ -146,13 +146,13 @@ export const useCachedImage = (uri: string, cacheMesh?: boolean) => {
   return { cachedBlob, isLoading };
 };
 
-export const useArt = (key?: StringPublicKey) => {
+export const useArt = (key?: StringPublicKey, refreshIndex?: number) => {
   const { metadata, editions, masterEditions, whitelistedCreatorsByCreator } =
     useMeta();
 
   const account = useMemo(
     () => metadata.find(a => a.pubkey === key),
-    [key, metadata],
+    [key, metadata, refreshIndex],
   );
 
   const art = useMemo(
@@ -163,13 +163,13 @@ export const useArt = (key?: StringPublicKey) => {
         masterEditions,
         whitelistedCreatorsByCreator,
       ),
-    [account, editions, masterEditions, whitelistedCreatorsByCreator],
+    [account, editions, masterEditions, whitelistedCreatorsByCreator, refreshIndex],
   );
 
   return art;
 };
 
-export const useExtendedArt = (id?: StringPublicKey) => {
+export const useExtendedArt = (id?: StringPublicKey, refreshIndex?: number) => {
   const { metadata } = useMeta();
 
   const [data, setData] = useState<IMetadataExtension>();
@@ -181,7 +181,7 @@ export const useExtendedArt = (id?: StringPublicKey) => {
 
   const account = useMemo(
     () => metadata.find(a => a.pubkey === key),
-    [key, metadata],
+    [key, metadata, refreshIndex],
   );
 
   useEffect(() => {
@@ -246,7 +246,7 @@ export const useExtendedArt = (id?: StringPublicKey) => {
         }
       }
     }
-  }, [inView, id, data, setData, account]);
+  }, [inView, id, data, setData, account, refreshIndex]);
 
   return { ref, data };
 };

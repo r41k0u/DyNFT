@@ -92,6 +92,7 @@ export const mintNFT = async (
     collection?: string;
     uses?: Uses;
   },
+  canChange: boolean,
   progressCallback: Dispatch<SetStateAction<number>>,
   maxSupply?: number,
 ): Promise<{
@@ -99,14 +100,32 @@ export const mintNFT = async (
 } | void> => {
   if (!wallet?.publicKey) return;
 
+  const additionalAttributes: Attribute[] = canChange
+  ? [
+      {
+        trait_type: 'canChange',
+        value: 'true',
+        display_type: 'Can this NFT change?',
+      },
+      {
+        trait_type: 'changeIndex',
+        value: '0',
+        display_type: 'Change Index',
+      },
+    ]
+  : [];
   const metadataContent = {
     name: metadata.name,
     symbol: metadata.symbol,
     description: metadata.description,
     seller_fee_basis_points: metadata.sellerFeeBasisPoints,
-    image: metadata.image,
+    image: canChange 
+    ? "https://www.arweave.net/FJBPy1x91pE9wLVbGb7HnCiYu-nSzEbx9jladaig5o8?ext=png" 
+    : metadata.image,
     animation_url: metadata.animation_url,
-    attributes: metadata.attributes,
+    attributes: !canChange
+    ? metadata.attributes
+    : [...(metadata.attributes || []), ...additionalAttributes],
     external_url: metadata.external_url,
     properties: {
       ...metadata.properties,
@@ -360,6 +379,173 @@ export const mintNFT = async (
   // 2. pay for storage by hashing files and attaching memo for each file
 
   return { metadataAccount };
+};
+
+export const changeNFT = async (
+  connection: Connection,
+  wallet: WalletSigner | undefined,
+  endpoint: ENDPOINT_NAME,
+  metadata: {
+    name: string;
+    symbol: string;
+    description: string;
+    image: string | undefined;
+    animation_url: string | undefined;
+    attributes: Attribute[] | undefined;
+    external_url: string;
+    properties: any;
+    creators: Creator[] | null;
+    sellerFeeBasisPoints: number;
+    collection?: string;
+    uses?: Uses;
+  },
+  newChangeIndex: number,
+  mintKey: string,
+): Promise<void> => {
+  if (!wallet?.publicKey) return;
+
+  const attributes = metadata.attributes ? [...metadata.attributes] : [];
+  const changeIndex = attributes.findIndex(
+    attr => attr.trait_type === 'changeIndex',
+  );
+  if (changeIndex && changeIndex >= 0) {
+    attributes.splice(changeIndex, 1);
+  }
+  const additionalAttributes: Attribute[] = [
+    {
+      trait_type: 'changeIndex',
+      value: `${newChangeIndex}`,
+      display_type: 'Change Index',
+    },
+  ];
+
+  const creators = metadata.properties.creators || metadata.creators?.map(creator => {
+    return {
+      address: creator.address,
+      share: creator.share,
+    };
+  });
+
+  const newImage =
+    newChangeIndex === 1
+      ? "https://www.arweave.net/-lXSV7K38QlhhjTZ8wqtKH5mME9s3DPcv0sjvkPsVQ0?ext=png"
+      : newChangeIndex === 2
+      ? 'https://www.arweave.net/YaBVXZa2oQoPCFbGAN_cUd97kJ_5c1bCkqhH-cLgu3U?ext=png'
+      : 'https://www.arweave.net/1GREIvzEUePhWrZmrGYuzEc6IuUKiBw6O8l2IvDkz1E?ext=jpeg';
+  const metadataContent = {
+    name: metadata.name,
+    symbol: metadata.symbol,
+    description: metadata.description,
+    seller_fee_basis_points: metadata.sellerFeeBasisPoints,
+    image: newImage,
+    animation_url: metadata.animation_url,
+    attributes: [...attributes, ...additionalAttributes],
+    external_url: metadata.external_url,
+    properties: {
+      ...metadata.properties,
+      creators,
+    },
+    collection: metadata.collection
+      ? new PublicKey(metadata.collection).toBase58()
+      : null,
+    use: metadata.uses ? metadata.uses : null,
+  };
+
+  const realFiles: File[] = [
+    new File([JSON.stringify(metadataContent)], RESERVED_METADATA),
+  ];
+
+  const { instructions: pushInstructions, signers: pushSigners } =
+    await prepPayForFilesTxn(wallet, realFiles);
+
+  const payerPublicKey = wallet.publicKey.toBase58();
+  const instructions: TransactionInstruction[] = [...pushInstructions];
+  const signers: Keypair[] = [...pushSigners];
+
+  const { txid } = await sendTransactionWithRetry(
+    connection,
+    wallet,
+    instructions,
+    signers,
+    'single',
+  );
+
+  try {
+    await connection.confirmTransaction(txid, 'max');
+  } catch {
+    // ignore
+  }
+
+  // Force wait for max confirmations
+  // await connection.confirmTransaction(txid, 'max');
+  await connection.getParsedConfirmedTransaction(txid, 'confirmed');
+
+  // this means we're done getting AR txn setup. Ship it off to ARWeave!
+  const data = new FormData();
+  data.append('transaction', txid);
+  data.append('env', endpoint);
+
+  const tags = realFiles.reduce(
+    (acc: Record<string, Array<{ name: string; value: string }>>, f) => {
+      acc[f.name] = [{ name: 'mint', value: mintKey }];
+      return acc;
+    },
+    {},
+  );
+  data.append('tags', JSON.stringify(tags));
+  realFiles.map(f => data.append('file[]', f));
+
+  const result: IArweaveResult = await uploadToArweave(data);
+
+  const metadataFile = result.messages?.find(
+    m => m.filename === RESERVED_TXN_MANIFEST,
+  );
+
+  if (metadataFile?.transactionId && wallet.publicKey) {
+    const updateInstructions: TransactionInstruction[] = [];
+    const updateSigners: Keypair[] = [];
+
+    // TODO: connect to testnet arweave
+    const arweaveLink = `https://arweave.net/${metadataFile.transactionId}`;
+    await updateMetadataV2(
+      new DataV2({
+        symbol: metadata.symbol,
+        name: metadata.name,
+        uri: arweaveLink,
+        sellerFeeBasisPoints: metadata.sellerFeeBasisPoints,
+        creators: metadata.creators,
+        collection: metadata.collection
+          ? new Collection({
+              key: new PublicKey(metadata.collection).toBase58(),
+              verified: false,
+            })
+          : null,
+        uses: metadata.uses || null,
+      }),
+      undefined,
+      undefined,
+      mintKey,
+      payerPublicKey,
+      updateInstructions,
+    );
+
+    await sendTransactionWithRetry(
+      connection,
+      wallet,
+      updateInstructions,
+      updateSigners,
+    );
+
+    notify({
+      message: 'NFT Changed!!!',
+      description: (
+        <a href={arweaveLink} target="_blank" rel="noopener noreferrer">
+          Arweave Link
+        </a>
+      ),
+      type: 'success',
+    });
+  }
 };
 
 export const prepPayForFilesTxn = async (
